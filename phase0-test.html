@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MGW Test">
+<title>Multi-Game Watcher — Phase 0 Test</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; height: 100vh; width: 100vw; overflow: hidden;
+    background: #0a0a0a; color: #eee;
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none; }
+
+  .grid { display: grid;
+    grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+    gap: 4px; height: 100vh; width: 100vw; padding: 4px; }
+
+  .pane { position: relative; background: #111; border-radius: 8px;
+    overflow: hidden; display: flex; flex-direction: column;
+    border: 2px solid #222; transition: border-color .15s; }
+  .pane.active { border-color: #4af; box-shadow: 0 0 0 1px #4af inset; }
+  .pane.audio { border-color: #2d7; box-shadow: 0 0 0 1px #2d7 inset; }
+
+  .header { padding: 6px 8px; background: rgba(0,0,0,0.75);
+    font-size: 12px; display: flex; gap: 6px; align-items: center; z-index: 3; flex-shrink: 0; }
+  .header input { flex: 1; min-width: 0;
+    background: #1a1a1a; color: #eee; border: 1px solid #333;
+    border-radius: 4px; padding: 5px 7px; font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
+  .header button { background: #3a6; color: #fff; border: 0;
+    border-radius: 4px; padding: 5px 10px; font-size: 11px; font-weight: 600; cursor: pointer; }
+  .header .label { font-weight: 700; font-size: 11px; color: #aaf; letter-spacing: .5px; text-transform: uppercase; flex-shrink: 0; }
+
+  .stage { flex: 1; position: relative; background: #000; }
+  .stage > iframe, .stage > div#player-0 {
+    position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+  .tap-overlay { position: absolute; inset: 0; z-index: 5; cursor: pointer; background: transparent; }
+  /* Overlay is opt-in via .overlay-on class so the overlay doesn't steal taps during the test */
+
+  .badge { position: absolute; top: 8px; right: 8px;
+    padding: 4px 10px; border-radius: 14px; background: rgba(0,0,0,0.8);
+    font-size: 11px; font-weight: 700; z-index: 6; pointer-events: none;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  .badge.on { background: #2d7; color: #000; }
+
+  .status { position: absolute; bottom: 8px; left: 8px;
+    padding: 3px 8px; border-radius: 4px; background: rgba(0,0,0,0.8);
+    font-size: 10px; font-family: ui-monospace, Menlo, monospace; z-index: 6;
+    pointer-events: none; max-width: calc(100% - 16px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .status.ok { background: rgba(40,140,60,0.85); }
+  .status.warn { background: rgba(200,140,20,0.85); }
+  .status.err { background: rgba(200,50,40,0.85); }
+
+  .toolbar { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.85); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border: 1px solid #333; border-radius: 20px;
+    padding: 6px 10px; display: flex; gap: 8px; z-index: 50; font-size: 11px; }
+  .toolbar button { background: #333; color: #eee; border: 0; border-radius: 14px;
+    padding: 6px 12px; font-size: 11px; font-weight: 600; cursor: pointer; }
+  .toolbar button.primary { background: #3a6; color: #fff; }
+  .toolbar button.active { background: #4af; color: #000; }
+
+  .instructions { position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%); background: #0e0e12;
+    border: 1px solid #333; border-radius: 14px; padding: 22px 26px;
+    max-width: 560px; width: calc(100% - 40px); z-index: 100;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.9); }
+  .instructions h1 { margin: 0 0 10px; font-size: 20px; }
+  .instructions h2 { margin: 14px 0 6px; font-size: 13px; color: #aaf;
+    text-transform: uppercase; letter-spacing: .5px; }
+  .instructions p, .instructions li { font-size: 13px; line-height: 1.5; opacity: 0.88; }
+  .instructions ol { padding-left: 18px; margin: 6px 0; }
+  .instructions code { background: #1a1a20; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+  .instructions button { background: #3a6; color: #fff; border: 0;
+    border-radius: 8px; padding: 12px 18px; font-size: 15px; font-weight: 700;
+    margin-top: 14px; width: 100%; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div id="instructions" class="instructions">
+  <h1>Multi-Game Watcher — Phase 0 test</h1>
+  <p>This page loads four streams in a 2×2 grid to check which broadcasters allow third-party iframe embedding on iPad.</p>
+
+  <h2>Before you start</h2>
+  <ol>
+    <li>In a separate Safari tab, open each of <code>watch.sportsnet.ca</code>, <code>tv.bell.ca</code>, and <code>tsn.ca</code> and sign in with your TV provider. This drops session cookies that the iframes on this page will reuse.</li>
+    <li>Come back to this tab, rotate your iPad to landscape, and tap <b>Start test</b> below.</li>
+  </ol>
+
+  <h2>What to look for</h2>
+  <ol>
+    <li><b>YouTube pane</b> should load and play muted on its own (the reference case).</li>
+    <li><b>Sportsnet / Bell / TSN</b>: each iframe may (a) load the normal site → good, (b) show an error / refuse to display → iframe blocked, (c) load but refuse to play video → DRM or player-restriction issue. Note which per pane.</li>
+    <li>Tap the YouTube pane to switch audio — if the badge flips to green and you hear sound, the core interaction is proven.</li>
+    <li>Sports panes can't be mute-controlled from outside in a web page — so tap them just to see the focus change; use each site's own mute button for audio.</li>
+  </ol>
+
+  <button onclick="startTest()">Start test</button>
+</div>
+
+<div class="grid" id="grid">
+
+  <!-- Pane 0: YouTube Live -->
+  <div class="pane" data-pane="0">
+    <div class="header">
+      <span class="label">1 · YouTube</span>
+      <input type="text" id="url-0" value="jfKfPfyJRdk" placeholder="video ID or URL (e.g. youtu.be/abc)">
+      <button onclick="loadPane(0)">Load</button>
+    </div>
+    <div class="stage">
+      <div id="player-0"></div>
+      <div class="tap-overlay" id="ov-0" onclick="onPaneTap(0, event)"></div>
+      <div class="badge" id="badge-0">muted</div>
+      <div class="status" id="status-0">idle</div>
+    </div>
+  </div>
+
+  <!-- Pane 1: Sportsnet -->
+  <div class="pane" data-pane="1">
+    <div class="header">
+      <span class="label">2 · Sportsnet</span>
+      <input type="text" id="url-1" value="https://www.sportsnet.ca/live/" placeholder="sportsnet URL">
+      <button onclick="loadPane(1)">Load</button>
+    </div>
+    <div class="stage">
+      <iframe id="iframe-1" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+      <div class="tap-overlay" id="ov-1" style="display:none" onclick="onPaneTap(1, event)"></div>
+      <div class="badge" id="badge-1">—</div>
+      <div class="status" id="status-1">idle</div>
+    </div>
+  </div>
+
+  <!-- Pane 2: Bell -->
+  <div class="pane" data-pane="2">
+    <div class="header">
+      <span class="label">3 · Bell</span>
+      <input type="text" id="url-2" value="https://tv.bell.ca/" placeholder="tv.bell.ca URL">
+      <button onclick="loadPane(2)">Load</button>
+    </div>
+    <div class="stage">
+      <iframe id="iframe-2" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+      <div class="tap-overlay" id="ov-2" style="display:none" onclick="onPaneTap(2, event)"></div>
+      <div class="badge" id="badge-2">—</div>
+      <div class="status" id="status-2">idle</div>
+    </div>
+  </div>
+
+  <!-- Pane 3: TSN -->
+  <div class="pane" data-pane="3">
+    <div class="header">
+      <span class="label">4 · TSN</span>
+      <input type="text" id="url-3" value="https://www.tsn.ca/live" placeholder="tsn.ca URL">
+      <button onclick="loadPane(3)">Load</button>
+    </div>
+    <div class="stage">
+      <iframe id="iframe-3" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+      <div class="tap-overlay" id="ov-3" style="display:none" onclick="onPaneTap(3, event)"></div>
+      <div class="badge" id="badge-3">—</div>
+      <div class="status" id="status-3">idle</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toolbar">
+  <button onclick="reloadAll()">Reload all</button>
+  <button id="overlay-btn" onclick="toggleOverlays()">Overlay taps: off</button>
+  <button class="primary" onclick="openInstructions()">Help</button>
+</div>
+
+<script>
+  // =========================================================================
+  // State
+  // =========================================================================
+  let ytReady = false;
+  let ytPlayer = null;
+  let pendingYTLoad = null;   // videoId waiting for API
+  let activeAudio = -1;       // pane index currently unmuted, or -1
+  let overlaysOn = false;
+
+  // =========================================================================
+  // UI helpers
+  // =========================================================================
+  function $(sel) { return document.querySelector(sel); }
+  function el(id) { return document.getElementById(id); }
+
+  function setStatus(idx, text, kind) {
+    const s = el('status-' + idx);
+    if (!s) return;
+    s.textContent = text;
+    s.className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  function setBadge(idx, text, on) {
+    const b = el('badge-' + idx);
+    if (!b) return;
+    b.textContent = text;
+    b.classList.toggle('on', !!on);
+  }
+
+  function setAudioPane(idx) {
+    document.querySelectorAll('.pane').forEach((p, i) => {
+      p.classList.toggle('audio', i === idx);
+    });
+  }
+
+  // =========================================================================
+  // YouTube IFrame API
+  // =========================================================================
+  function extractYouTubeId(input) {
+    if (!input) return '';
+    input = input.trim();
+    // bare ID
+    if (/^[A-Za-z0-9_-]{11}$/.test(input)) return input;
+    // URL forms
+    const m = input.match(/(?:youtube\.com\/(?:watch\?v=|live\/|embed\/|v\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+    return m ? m[1] : input;
+  }
+
+  function loadYouTube(videoId) {
+    if (!videoId) { setStatus(0, 'no video id', 'err'); return; }
+    if (!ytReady) {
+      pendingYTLoad = videoId;
+      setStatus(0, 'waiting for YouTube API…');
+      return;
+    }
+    // Reset player holder
+    const stage = document.querySelector('[data-pane="0"] .stage');
+    const old = el('player-0');
+    if (old) old.remove();
+    const holder = document.createElement('div');
+    holder.id = 'player-0';
+    stage.insertBefore(holder, stage.firstChild);
+
+    setStatus(0, 'creating player…');
+    ytPlayer = new YT.Player('player-0', {
+      videoId,
+      playerVars: {
+        autoplay: 1,
+        playsinline: 1,
+        modestbranding: 1,
+        rel: 0,
+        mute: 1,
+        controls: 1,
+      },
+      events: {
+        onReady: e => {
+          try { e.target.mute(); e.target.playVideo(); } catch (err) {}
+          setStatus(0, 'loaded ✓', 'ok');
+          setBadge(0, 'muted', false);
+        },
+        onStateChange: e => {
+          const states = { '-1':'unstarted', '0':'ended', '1':'playing',
+                           '2':'paused', '3':'buffering', '5':'cued' };
+          setStatus(0, states[e.data] || ('state ' + e.data),
+                    e.data === 1 ? 'ok' : null);
+        },
+        onError: e => {
+          const msg = ({2:'bad param',5:'html5 err',100:'not found',
+                        101:'no embed',150:'no embed'})[e.data] || ('err ' + e.data);
+          setStatus(0, msg, 'err');
+        },
+      },
+    });
+  }
+
+  // Hook called by the YouTube script tag once loaded
+  window.onYouTubeIframeAPIReady = function () {
+    ytReady = true;
+    if (pendingYTLoad) {
+      const v = pendingYTLoad; pendingYTLoad = null;
+      loadYouTube(v);
+    }
+  };
+
+  // =========================================================================
+  // Generic iframe loader (Sportsnet / Bell / TSN)
+  // =========================================================================
+  function loadIframe(idx, url) {
+    const f = el('iframe-' + idx);
+    if (!f) return;
+    if (!/^https?:\/\//i.test(url)) { setStatus(idx, 'need full URL (https://…)', 'err'); return; }
+    setStatus(idx, 'loading ' + hostOf(url) + '…');
+    const started = Date.now();
+    f.onload = () => {
+      // Browsers fire onload even when a frame is blocked by X-Frame-Options
+      // (the frame renders a "refused to connect" chrome). We can't peek inside
+      // cross-origin frames, so we can only flag load-fired + elapsed time.
+      const dt = Date.now() - started;
+      setStatus(idx, 'onload fired · ' + dt + 'ms · inspect visually', 'warn');
+    };
+    f.onerror = () => setStatus(idx, 'onerror', 'err');
+    f.src = url;
+  }
+
+  function hostOf(url) {
+    try { return new URL(url).host; } catch (e) { return url; }
+  }
+
+  // =========================================================================
+  // Load controller
+  // =========================================================================
+  function loadPane(idx) {
+    const input = el('url-' + idx);
+    const url = input ? input.value.trim() : '';
+    if (idx === 0) loadYouTube(extractYouTubeId(url));
+    else          loadIframe(idx, url);
+  }
+
+  function reloadAll() {
+    for (let i = 0; i < 4; i++) loadPane(i);
+  }
+
+  function startTest() {
+    el('instructions').style.display = 'none';
+    reloadAll();
+  }
+
+  function openInstructions() {
+    el('instructions').style.display = 'block';
+  }
+
+  // =========================================================================
+  // Tap-to-switch-audio
+  // =========================================================================
+  function onPaneTap(idx, evt) {
+    // Only YouTube pane has a programmatic mute API available to us.
+    // For sports panes, we toggle the badge and mute YouTube — user still has
+    // to press the sport-site's own mute button if it was making noise.
+    if (evt) { evt.preventDefault(); evt.stopPropagation(); }
+
+    document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
+    document.querySelector('[data-pane="' + idx + '"]').classList.add('active');
+
+    // Clear previous audio badge
+    if (activeAudio >= 0 && activeAudio !== idx) {
+      setBadge(activeAudio, activeAudio === 0 ? 'muted' : '—', false);
+    }
+
+    if (idx === 0) {
+      if (!ytPlayer) return;
+      if (activeAudio === 0) {
+        try { ytPlayer.mute(); } catch (e) {}
+        setBadge(0, 'muted', false);
+        activeAudio = -1;
+      } else {
+        try { ytPlayer.unMute(); } catch (e) {}
+        setBadge(0, 'AUDIO', true);
+        activeAudio = 0;
+      }
+    } else {
+      // Non-YouTube: mute YouTube and flag this pane as the "intended audible"
+      if (ytPlayer) { try { ytPlayer.mute(); } catch (e) {} }
+      setBadge(0, 'muted', false);
+      if (activeAudio === idx) {
+        setBadge(idx, '—', false);
+        activeAudio = -1;
+      } else {
+        setBadge(idx, 'AUDIO*', true);
+        activeAudio = idx;
+      }
+    }
+    setAudioPane(activeAudio);
+  }
+
+  // =========================================================================
+  // Overlay toggle — the tap-overlays eat taps inside iframes, which is bad
+  // during the test (you want to click play inside Sportsnet's player).
+  // Turn them on only once each pane is playing.
+  // =========================================================================
+  function toggleOverlays() {
+    overlaysOn = !overlaysOn;
+    for (let i = 1; i < 4; i++) {
+      const ov = el('ov-' + i);
+      if (ov) ov.style.display = overlaysOn ? 'block' : 'none';
+    }
+    const btn = el('overlay-btn');
+    btn.textContent = 'Overlay taps: ' + (overlaysOn ? 'on' : 'off');
+    btn.classList.toggle('active', overlaysOn);
+  }
+
+  // =========================================================================
+  // Kick off YouTube script load
+  // =========================================================================
+  (function loadYTApi() {
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    tag.async = true;
+    document.head.appendChild(tag);
+  })();
+</script>
+</body>
+</html>
